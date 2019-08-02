@@ -8,8 +8,8 @@ use crate::headers::convert_4bits_to_num;
 use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr};
 use typenum::{U4};
 use bit_array::BitArray;
-use clap::{Arg, App, SubCommand};
-
+use clap::{Arg, App};
+use std::path::Path;
 
 const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
@@ -22,7 +22,6 @@ struct PktMetaInfo {
 }
 
 impl PktMetaInfo {
-
     fn new() -> PktMetaInfo {
         PktMetaInfo {
             seconds      : 0,
@@ -32,8 +31,6 @@ impl PktMetaInfo {
         }
     }
 }
-
-
 
 // convert to structs
 enum PacketType {
@@ -53,7 +50,7 @@ enum PacketType {
 struct PktInfo {
     meta: PktMetaInfo,
     packet_bytes: [u8; MAX_ETH_PKT],
-    packet: PacketType,
+    packet_type: PacketType,
     timestamp   : f64
 }
 
@@ -61,6 +58,9 @@ impl PktInfo {
 
     // create new PktInfo
     // fn new(meta: PktMetaInfo, )
+    fn new(meta: PktMetaInfo) -> PktInfo {
+        
+    }
 
 
 
@@ -93,6 +93,13 @@ struct ConnectionInfo {
     tcp_info  : Option<TcpConnInfo>
 }
 
+enum Opts {
+    PacketDump,
+    Summary,
+    RTT,
+    Missing
+}
+
 fn main() {
     let matches = App::new("Transport Analysis")
                         .version("1.0")
@@ -103,29 +110,52 @@ fn main() {
                             .help("Path of packet trace")
                             .takes_value(true)
                             .required(true))
-                        .arg(Arg::with_name("s")
-                            .short("s")
-                            .help("Connection summaries"))
                         .arg(Arg::with_name("p")
                             .short("p")
                             .help("Packet dumping"))
+                        .arg(Arg::with_name("s")
+                            .short("s")
+                            .help("Connection summaries"))
                         .arg(Arg::with_name("t")
                             .short("t")
-                            .help("RTT"))
+                            .help("Round trip times"))
                         .get_matches();
 
+    let s_opt = matches.is_present("s");
+    let p_opt = matches.is_present("p");
+    let t_opt = matches.is_present("t");
 
-    // find Rusty way to do this
-    let filename = matches.value_of("r").unwrap_or_default();
-    if filename == "" {
-        std::process::exit(1);
+    // Counting the options supplied in the argument
+    let mut filename_arg = Opts::Missing;
+    let mut opts_count = 0;
+    if s_opt {
+        opts_count = opts_count + 1;
+        filename_arg = Opts::Summary;
+    }
+    if p_opt {
+        opts_count = opts_count + 1;
+        filename_arg = Opts::PacketDump;
+    }
+    if t_opt {
+        opts_count = opts_count + 1;
+        filename_arg = Opts::RTT;
+    }
+
+    if opts_count > 1 {
+        error_exit("Too many printing options detected".to_string());
+    } else if opts_count == 0 {
+        error_exit("No option supplied".to_string());
+    }
+
+    let filename_str = matches.value_of("r").unwrap();
+
+    match filename_arg {
+        Opts::Summary    => connection_summaries(filename_str),
+        Opts::PacketDump => packet_dumping(filename_str),
+        Opts::RTT        => roundtrip_times(filename_str),
+        Opts::Missing    => error_exit(String::from("Missing option"))
     }
     sample_program();
-
-    // match filename_arg {
-    //     Some(_) => filename = filename_arg.unwrap()
-    //     None => process::exit(0)
-    // }
 }
 
 fn sample_program() {
@@ -135,6 +165,19 @@ fn sample_program() {
     println!("{}", conversion);
 }
 
+fn connection_summaries(filename_str: &str) {
+
+}
+
+
+fn packet_dumping(filename_str: &str) {
+
+}
+
+fn roundtrip_times(filename_str: &str) {
+
+}
+
 
 fn next_packet(packetInfo: &PktInfo) -> bool {
 
@@ -142,3 +185,7 @@ fn next_packet(packetInfo: &PktInfo) -> bool {
     return true     // the next packet is successfully read
 }
 
+fn error_exit(err_message: String) {
+    eprintln!("Error in Transport Analysis: {}!", err_message);
+    std::process::exit(0);
+}
