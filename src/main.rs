@@ -1,15 +1,13 @@
 mod headers;
 
-extern crate typenum;
-extern crate bit_array;
 extern crate clap;
 
-use crate::headers::convert_4bits_to_num;
 use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr};
-use typenum::{U4};
-use bit_array::BitArray;
 use clap::{Arg, App};
 use std::path::Path;
+use std::fs::File;
+use std::io::BufReader;
+use std::error::Error;
 
 const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
@@ -49,7 +47,7 @@ enum PacketType {
 
 struct PktInfo {
     meta: PktMetaInfo,
-    packet_bytes: [u8; MAX_ETH_PKT],
+    packet_bytes: Vec<u8>,
     packet_type: PacketType,
     timestamp   : f64
 }
@@ -59,17 +57,14 @@ impl PktInfo {
     // create new PktInfo
     // fn new(meta: PktMetaInfo, )
     fn new(meta: PktMetaInfo) -> PktInfo {
-        
+        PktInfo {
+            meta : meta,
+            packet_bytes : Vec::with_capacity(MAX_ETH_PKT),
+            packet_type : PacketType::Unknown,
+            timestamp : 0.0
+        }
     }
 
-
-
-    // reset the PktInfo for new processing
-
-    // fn reset(&self) {
-    //     s;
-
-    // }
 }
 
 // #[derive(Hash)]
@@ -155,14 +150,6 @@ fn main() {
         Opts::RTT        => roundtrip_times(filename_str),
         Opts::Missing    => error_exit(String::from("Missing option"))
     }
-    sample_program();
-}
-
-fn sample_program() {
-    let mut arr = BitArray::<u32, U4>::from_elem(false);
-    arr.set(3, true);
-    let conversion = convert_4bits_to_num(arr);
-    println!("{}", conversion);
 }
 
 fn connection_summaries(filename_str: &str) {
@@ -171,6 +158,15 @@ fn connection_summaries(filename_str: &str) {
 
 
 fn packet_dumping(filename_str: &str) {
+    let display = Path::new(filename_str).display();
+
+    let trace = match File::open(filename_str) {
+        Err(why) => panic!("Failed to open {}: {}", display, why.description()),
+        Ok(trace) => trace, 
+    };
+    let mut reader = BufReader::new(trace);
+    
+    let mut packet = PktInfo::new(PktMetaInfo::new());
 
 }
 
@@ -179,13 +175,27 @@ fn roundtrip_times(filename_str: &str) {
 }
 
 
-fn next_packet(packetInfo: &PktInfo) -> bool {
+fn next_packet(mut packetInfo: &PktInfo, mut fileReader: BufReader<File>) -> bool {
+    
+    
 
+    
+    
 
     return true     // the next packet is successfully read
 }
 
+fn read_u32_from_file(fileReader: BufReader<File>) -> u32 {
+    let buffer = String::new();
+    // let read = fileReader.read_to_string(buffer);
+
+    return 1;
+}
+
+fn read_u16_from_file(fileReader: BufReader<File>) {
+
+}
+
 fn error_exit(err_message: String) {
-    eprintln!("Error in Transport Analysis: {}!", err_message);
-    std::process::exit(0);
+    panic!("Error in Transport Analysis: {}!", err_message)
 }

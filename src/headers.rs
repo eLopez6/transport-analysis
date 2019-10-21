@@ -1,9 +1,4 @@
-extern crate typenum;
-extern crate bit_array;
-
-use bit_array::BitArray;
-use typenum::{U2, U3, U4, U6, U13};
-
+use bit_vec::BitVec;
 
 const MAC_LENGTH:  usize = 6;
 const TYPE_LENGTH: usize = 2;
@@ -31,14 +26,14 @@ enum Options {
 }
 
 pub struct Iphdr {
-    version       : BitArray<u32, U4>,
-    ihl           : BitArray<u32, U4>,
-    dscp          : BitArray<u32, U6>,
-    en            : BitArray<u32, U2>,
+    version       : BitVec,     // 4 bits
+    ihl           : BitVec,     // 4 bits
+    dscp          : BitVec,     // 6 bits
+    ecn           : BitVec,     // 2 bits
     tot_len       : u16,
     identification: u16,
-    flags         : BitArray<u32, U3>,
-    frag_offset   : BitArray<u32, U13>,
+    flags         : BitVec,     // 3 bits
+    frag_offset   : BitVec,     // 13 bits
     ttl           : u8,
     protocol      : u8,
     hdr_checksum  : u16,
@@ -61,27 +56,32 @@ pub struct Tcphdr {
     dst_port   : u16,
     seq_num    : u32,
     ack_num    : u32,
-    data_off   : BitArray<u32, U4>,
-    reserved   : BitArray<u32, U4>,
-    flags      : u8,    // each flag is 1 bit
+    data_off   : BitVec,    // 4 bits
+    reserved   : BitVec,    // 4 bits
+    flags      : BitVec,    // 8 bits
     window_size: u16,
     checksum   : u16, 
     urg_pointer: u16,
     options    : Option<Options>,
     head_length: u8,
-    malformed  : bool
+    malformed  : bool   // this is true when the data_off*4 != the length of the packet
 }
 
 // Where the ith bit of the array 0b1000 => 3,2,1,0
-pub fn convert_4bits_to_num(field: BitArray<u32, U4>) -> u16 {
-    match field.get(3) {
-        Some(true) => 32,    // 0b1000
-        _          => match field.get(1) {
-            Some(true) => 20,    // 0b0101
-            _          => match field.get(0) {
-                Some(true) => 28,    // 0b0111
-                _          => 24     // 0b0110
+fn convert_4bits_to_num(field: BitVec) -> u16 {
+    if field.capacity() != 4 {
+        match field.get(3) {
+            Some(true) => 32,                    // 0b1000
+            _          => match field.get(1) {
+                Some(true) => 20,                // 0b0101
+                _          => match field.get(0) {
+                    Some(true) => 28,            // 0b0111
+                    _          => 24             // 0b0110
+                }
             }
         }
+    }
+    else {
+        panic!("BitVec supplied has an invalid capacity: {}", field.capacity().to_string());
     }
 }
