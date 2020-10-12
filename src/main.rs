@@ -6,8 +6,7 @@ use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr};
 use clap::{Arg, App};
 use std::path::Path;
 use std::fs::File;
-use std::io::BufReader;
-use std::error::Error;
+use std::io::{Read, BufReader};
 
 const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
@@ -20,12 +19,21 @@ struct PktMetaInfo {
 }
 
 impl PktMetaInfo {
-    fn new() -> PktMetaInfo {
+    fn new_empty() -> PktMetaInfo {
         PktMetaInfo {
             seconds      : 0,
             microseconds : 0,
             caplen       : 0,
             ignored      : 0
+        }
+    }
+
+    fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInfo {
+        PktMetaInfo {
+            seconds: seconds,
+            microseconds: microseconds,
+            caplen: caplen,
+            ignored: ignored
         }
     }
 }
@@ -161,12 +169,12 @@ fn packet_dumping(filename_str: &str) {
     let display = Path::new(filename_str).display();
 
     let trace = match File::open(filename_str) {
-        Err(why) => panic!("Failed to open {}: {}", display, why.description()),
+        Err(why) => panic!("Failed to open {}: {}", display, why.to_string()),
         Ok(trace) => trace, 
     };
     let mut reader = BufReader::new(trace);
     
-    let mut packet = PktInfo::new(PktMetaInfo::new());
+    let mut packet = PktInfo::new(PktMetaInfo::new_empty());
 
 }
 
@@ -174,26 +182,32 @@ fn roundtrip_times(filename_str: &str) {
 
 }
 
+fn next_packet_meta(file_reader: &mut BufReader<File>) -> PktMetaInfo {
+    let seconds = read_u32_from_file(file_reader);
+    let microseconds = read_u32_from_file(file_reader);
+    let caplen = read_u16_from_file(file_reader);
+    let ignored = read_u16_from_file(file_reader);
 
-fn next_packet(mut packetInfo: &PktInfo, mut fileReader: BufReader<File>) -> bool {
-    
-    
-
-    
-    
-
-    return true     // the next packet is successfully read
+    PktMetaInfo::new(seconds, microseconds, caplen, ignored)
 }
 
-fn read_u32_from_file(fileReader: BufReader<File>) -> u32 {
-    let buffer = String::new();
-    // let read = fileReader.read_to_string(buffer);
-
-    return 1;
+// Move to library
+fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
+    let mut buf32 = [0; 4];
+    match file_reader.read_exact(&mut buf32) {
+        Ok(()) => u32::from_ne_bytes(buf32),
+        Err(why) => panic!("Error in Transport Analysis:\nFailed to read u32: {}", why.to_string())
+    }
 }
 
-fn read_u16_from_file(fileReader: BufReader<File>) {
 
+// Move to library
+fn read_u16_from_file(mut file_reader: &mut BufReader<File>) -> u16 {
+    let mut buf16 = [0; 2];
+    match file_reader.read_exact(&mut buf16) {
+        Ok(()) => u16::from_ne_bytes(buf16),
+        Err(why) => panic!("Failed to read u16: {}", why.to_string())
+    }
 }
 
 fn error_exit(err_message: String) {
