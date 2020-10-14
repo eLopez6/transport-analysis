@@ -2,11 +2,12 @@ mod headers;
 
 extern crate clap;
 
-use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr};
+use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, eth_hdr_len, ip_hdr_len};
 use clap::{Arg, App};
-use std::path::Path;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{Read, BufReader};
+use std::path::Path;
 
 const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
@@ -145,9 +146,9 @@ fn main() {
     }
 
     if opts_count > 1 {
-        error_exit("Too many printing options detected".to_string());
+        error_exit("Too many printing options detected");
     } else if opts_count == 0 {
-        error_exit("No option supplied".to_string());
+        error_exit("No option supplied");
     }
 
     let filename_str = matches.value_of("r").unwrap();
@@ -156,7 +157,7 @@ fn main() {
         Opts::Summary    => connection_summaries(filename_str),
         Opts::PacketDump => packet_dumping(filename_str),
         Opts::RTT        => roundtrip_times(filename_str),
-        Opts::Missing    => error_exit(String::from("Missing option"))
+        Opts::Missing    => error_exit("Missing option")
     }
 }
 
@@ -191,6 +192,68 @@ fn next_packet_meta(file_reader: &mut BufReader<File>) -> PktMetaInfo {
     PktMetaInfo::new(seconds, microseconds, caplen, ignored)
 }
 
+fn next_packet(file_reader: &mut BufReader<File>) -> PktInfo {
+    let mut packet_meta_info = next_packet_meta(file_reader);
+    let mut packet_info = PktInfo::new(packet_meta_info);
+
+    if packet_meta_info.caplen > MAX_ETH_PKT as u16 {
+        error_exit("Packet size is larger than MAX_ETH_PKT");
+    }
+
+    let packet_length: usize = (packet_meta_info.caplen - 12).into();
+    let mut packet_buffer = vec![0u8; packet_length];
+    match file_reader.read_exact(&mut packet_buffer) {
+        Err(why) => panic!("Error in  Transport Analysis:\nFailed to read the packet: {}", why.to_string()),
+        Ok(()) => {
+            let ether_header = next_eth_packet(file_reader);
+            match ether_header.typ {
+                2048 => packet_info,
+                _    => packet_info
+                 
+            }
+        }
+    }
+}
+
+fn next_eth_packet(file_reader: &mut BufReader<File>) -> Etherhdr {
+    let mut packet_buffer = vec![0u8; eth_hdr_len];
+    match file_reader.read_exact(&mut packet_buffer) {
+        Err(why) => panic!("Error in Transport Analysis:\n Failed to read the packet: {}", why.to_string()),
+        Ok(()) => {
+            let src_addr  = mac_slice_to_array(&packet_buffer[0..5]);
+            let dest_addr = mac_slice_to_array(&packet_buffer[6..11]);
+            let typ = type_slice_to_u16(&packet_buffer[12..]);
+            Etherhdr::new(src_addr, dest_addr, typ)
+        }
+    }
+}
+
+fn next_ip_packet(file_reader: &mut BufReader<File>) -> Iphdr {
+
+}
+
+fn next_tcp_packet(file_reader: &mut BufReader<File>) -> Tcphdr {
+
+}
+
+fn next_udp_packet(file_reader: &mut BufReader<File>) -> Udphdr {
+
+}
+
+fn mac_slice_to_array(mac_slice: &[u8]) -> [u8; 6] {
+    match mac_slice.try_into() {
+        Ok(mac) => mac,
+        Err(why) => panic!("Error in Transport Analysis:\nFailed to convert MAC slice.")
+    }
+}
+
+fn type_slice_to_u16(type_slice: &[u8]) -> u16 {
+    match type_slice.try_into() {
+        Ok(typ) => u16::from_ne_bytes(typ),
+        Err(why) => panic!("Error in Transport Analysis:\nFailed to convert Type slice.")
+    }
+}
+
 // Move to library
 fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
     let mut buf32 = [0; 4];
@@ -199,7 +262,6 @@ fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
         Err(why) => panic!("Error in Transport Analysis:\nFailed to read u32: {}", why.to_string())
     }
 }
-
 
 // Move to library
 fn read_u16_from_file(mut file_reader: &mut BufReader<File>) -> u16 {
@@ -210,6 +272,6 @@ fn read_u16_from_file(mut file_reader: &mut BufReader<File>) -> u16 {
     }
 }
 
-fn error_exit(err_message: String) {
+fn error_exit(err_message: &str) {
     panic!("Error in Transport Analysis: {}!", err_message)
 }

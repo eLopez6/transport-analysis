@@ -1,19 +1,30 @@
-use bit_vec::BitVec;
+use bitvec::array::BitArray;
+use bitvec::order::Lsb0;
 
 const MAC_LENGTH:  usize = 6;
-const TYPE_LENGTH: usize = 2;
 const CRC_LENGTH:  usize = 4;
 
 const OPTIONS_28: usize = 2;
 const OPTIONS_32: usize = 3;
 const OPTIONS_36: usize = 4;
 
+pub const eth_hdr_len: usize = 14;
+pub const ip_hdr_len: usize = 20;
+pub const udp_hdr_len: usize = 8;
+
 pub struct Etherhdr {
-    preamble: u8,
-    dest_adr: [u8; MAC_LENGTH],
-    src_adr : [u8; MAC_LENGTH],
-    typ     : [u8; TYPE_LENGTH],
-    crc     : [u8; CRC_LENGTH]
+    pub src_adr : [u8; MAC_LENGTH],
+    pub dest_adr: [u8; MAC_LENGTH],
+    pub typ     : u16
+}
+impl Etherhdr {
+    pub fn new(src_adr: [u8; MAC_LENGTH], dest_adr: [u8; MAC_LENGTH], typ: u16) -> Etherhdr {
+        Etherhdr {
+            src_adr: src_adr,
+            dest_adr: dest_adr,
+            typ: typ
+        }
+    }
 }
 
 // The same Options enum can be used for IP and TCP
@@ -26,23 +37,26 @@ enum Options {
 }
 
 pub struct Iphdr {
-    version       : BitVec,     // 4 bits
-    ihl           : BitVec,     // 4 bits
-    dscp          : BitVec,     // 6 bits
-    ecn           : BitVec,     // 2 bits
-    tot_len       : u16,
-    identification: u16,
-    flags         : BitVec,     // 3 bits
-    frag_offset   : BitVec,     // 13 bits
-    ttl           : u8,
-    protocol      : u8,
-    hdr_checksum  : u16,
-    src_ip_adr    : u32,
-    dst_ip_adr    : u32,
-    options       : Option<Options>,
-    head_length   : u8,
-    malformed     : bool    // this is true when ihl*4 != the length of the packet
+    pub version       : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,     // 4 bits
+    pub ihl           : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,     // 4 bits
+    pub dscp          : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(6)]>,     // 6 bits
+    pub ecn           : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(2)]>,     // 2 bits
+    pub tot_len       : u16,
+    pub identification: u16,
+    pub flags         : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(3)]>,      // 3 bits
+    pub frag_offset   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(13)]>,     // 13 bits
+    pub ttl           : u8,
+    pub protocol      : u8,
+    pub hdr_checksum  : u16,
+    pub src_ip_adr    : u32,
+    pub dst_ip_adr    : u32,
+    pub options       : Option<Options>,
+    pub head_length   : u8,
+    pub malformed     : bool    // this is true when ihl*4 != the length of the packet
 }
+// impl Iphdr {
+//     pub fn new() 
+// }
 
 pub struct Udphdr {
     src_port: u16,
@@ -56,9 +70,9 @@ pub struct Tcphdr {
     dst_port   : u16,
     seq_num    : u32,
     ack_num    : u32,
-    data_off   : BitVec,    // 4 bits
-    reserved   : BitVec,    // 4 bits
-    flags      : BitVec,    // 8 bits
+    data_off   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,    // 4 bits
+    reserved   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(3)]>,    // 3 bits
+    flags      : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(9)]>,    // 9 bits
     window_size: u16,
     checksum   : u16, 
     urg_pointer: u16,
@@ -68,12 +82,12 @@ pub struct Tcphdr {
 }
 
 // Where the ith bit of the array 0b1000 => 3,2,1,0
-fn convert_4bits_to_num(field: BitVec) -> u16 {
-    if field.capacity() != 4 {
+fn convert_4bits_to_num(field: BitArray) -> u16 {
+    if field.len() != 4 {
         match field.get(3) {
             Some(true) => 32,                    // 0b1000
             _          => match field.get(1) {
-                Some(true) => 20,                // 0b0101
+                Some(true) => ip_hdr_len as u16,                // 0b0101
                 _          => match field.get(0) {
                     Some(true) => 28,            // 0b0111
                     _          => 24             // 0b0110
@@ -82,6 +96,6 @@ fn convert_4bits_to_num(field: BitVec) -> u16 {
         }
     }
     else {
-        panic!("BitVec supplied has an invalid capacity: {}", field.capacity().to_string());
+        panic!("BitArray supplied has an invalid capacity: {}", field.len());
     }
 }
