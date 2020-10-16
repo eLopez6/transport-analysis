@@ -1,5 +1,6 @@
 use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
+use bitvec::prelude::*;
 
 const MAC_LENGTH:  usize = 6;
 const CRC_LENGTH:  usize = 4;
@@ -28,61 +29,131 @@ impl Etherhdr {
 }
 
 // The same Options enum can be used for IP and TCP
-enum Options {
+pub enum Options {
+    Ignored,
+    Malformed,
     Opts20,
-    Opts24(u32),
-    Opts28([u32; OPTIONS_28]),
-    Opts32([u32; OPTIONS_32]),
-    Opts36([u32; OPTIONS_36])
+    Opts24,
+    Opts28,
+    Opts32,
 }
 
 pub struct Iphdr {
-    pub version       : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,     // 4 bits
-    pub ihl           : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,     // 4 bits
-    pub dscp          : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(6)]>,     // 6 bits
-    pub ecn           : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(2)]>,     // 2 bits
+    pub version       : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,     // 4 bits
+    pub ihl           : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,     // 4 bits
+    pub dscp          : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(6)]>,     // 6 bits
+    pub ecn           : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(2)]>,     // 2 bits
     pub tot_len       : u16,
     pub identification: u16,
-    pub flags         : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(3)]>,      // 3 bits
-    pub frag_offset   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(13)]>,     // 13 bits
+    pub flags         : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(3)]>,      // 3 bits
+    pub frag_offset   : BitArray<Lsb0, [u16; bitvec::mem::elts::<u16>(13)]>,     // 13 bits
     pub ttl           : u8,
     pub protocol      : u8,
     pub hdr_checksum  : u16,
     pub src_ip_adr    : u32,
     pub dst_ip_adr    : u32,
-    pub options       : Option<Options>,
+    pub options       : Options,
     pub head_length   : u8,
     pub malformed     : bool    // this is true when ihl*4 != the length of the packet
 }
-// impl Iphdr {
-//     pub fn new() 
-// }
+impl Iphdr {
+    pub fn malformed_header() -> Iphdr {
+        Iphdr {
+            malformed: true,
+            tot_len: 0,
+            identification: 0,
+            ttl: 0,
+            protocol: 0,
+            hdr_checksum: 0,
+            src_ip_adr: 0,
+            dst_ip_adr: 0,
+            options: Options::Malformed,
+            head_length: 0,
+            version: bitarr![Lsb0, u8; 0; 4],
+            ihl: bitarr![Lsb0, u8; 0; 4],
+            dscp: bitarr![Lsb0, u8; 0; 6],
+            ecn: bitarr![Lsb0, u8; 0; 2],
+            flags: bitarr![Lsb0, u8; 0; 3],
+            frag_offset: bitarr![Lsb0, u16; 0; 13]
+        }
+    }
+
+    pub fn ignored_ver_header(ip_ver: u8) -> Iphdr {
+        Iphdr {
+            malformed: false,
+            tot_len: 0,
+            identification: 0,
+            ttl: 0,
+            protocol: 0,
+            hdr_checksum: 0,
+            src_ip_adr: 0,
+            dst_ip_adr: 0,
+            options: Options::Ignored,
+            head_length: 0,
+            version: bitarr![Lsb0, u8; ip_ver; 4],
+            ihl: bitarr![Lsb0, u8; 0; 4],
+            dscp: bitarr![Lsb0, u8; 0; 6],
+            ecn: bitarr![Lsb0, u8; 0; 2],
+            flags: bitarr![Lsb0, u8; 0; 3],
+            frag_offset: bitarr![Lsb0, u16; 0; 13]
+        }
+    }
+    
+    pub fn new(version: u8, ihl: u8, dscp: u8, ecn: u8, total_len: u16, id: u16, flags: u8, frags: u16, ttl: u8, protocol: u8, hdr_checksum: u16, options: Options, src: u32, dst: u32, header_len: u8) -> Iphdr {
+        let ver = bitarr![Lsb0, u8; version; 4];
+        let ihl = bitarr![Lsb0, u8; ihl; 4];
+        let dscp = bitarr![Lsb0, u8; dscp; 6];
+        let ecn = bitarr![Lsb0, u8; ecn; 2];
+        let flags = bitarr![Lsb0, u8; flags; 3];
+        let frag_offset = bitarr![Lsb0, u16; frags; 13];
+
+        Iphdr {
+            version: ver,
+            ihl: ihl,
+            dscp: dscp,
+            ecn: ecn,
+            flags: flags,
+            frag_offset: frag_offset,
+            tot_len: total_len,
+            identification: id,
+            ttl: ttl,
+            protocol: protocol,
+            hdr_checksum: hdr_checksum,
+            src_ip_adr: src,
+            dst_ip_adr: dst,
+            options: options,
+            head_length: header_len,
+            malformed: false
+        }
+    
+    }
+}
 
 pub struct Udphdr {
-    src_port: u16,
-    dst_port: u16,
-    length  : u16,
-    checksum: u16
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub length  : u16,
+    pub checksum: u16
 }
 
 pub struct Tcphdr {
-    src_port   : u16,
-    dst_port   : u16,
-    seq_num    : u32,
-    ack_num    : u32,
-    data_off   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(4)]>,    // 4 bits
-    reserved   : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(3)]>,    // 3 bits
-    flags      : BitArray<Lsb0, [usize; bitvec::mem::elts::<usize>(9)]>,    // 9 bits
-    window_size: u16,
-    checksum   : u16, 
-    urg_pointer: u16,
-    options    : Option<Options>,
-    head_length: u8,
-    malformed  : bool   // this is true when the data_off*4 != the length of the packet
+    pub src_port   : u16,
+    pub dst_port   : u16,
+    pub seq_num    : u32,
+    pub ack_num    : u32,
+    pub data_off   : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,    // 4 bits
+    pub reserved   : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(3)]>,    // 3 bits
+    pub flags      : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(9)]>,    // 9 bits
+    pub window_size: u16,
+    pub checksum   : u16, 
+    pub urg_pointer: u16,
+    pub options    : Option<Options>,
+    pub head_length: u8,
+    pub malformed  : bool   // this is true when the data_off*4 != the length of the packet
 }
 
 // Where the ith bit of the array 0b1000 => 3,2,1,0
-fn convert_4bits_to_num(field: BitArray) -> u16 {
+fn convert_4bits_to_num(field: BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>) -> u16 {
     if field.len() != 4 {
         match field.get(3) {
             Some(true) => 32,                    // 0b1000

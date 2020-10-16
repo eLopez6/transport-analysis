@@ -2,7 +2,7 @@ mod headers;
 
 extern crate clap;
 
-use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, eth_hdr_len, ip_hdr_len};
+use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, Options, eth_hdr_len, ip_hdr_len};
 use clap::{Arg, App};
 use std::convert::TryInto;
 use std::fs::File;
@@ -11,6 +11,8 @@ use std::path::Path;
 
 const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
+const FIRST_NIBBLE: u8 = 0b11110000;
+const SECONDNIBBLE: u8 = 0b00001111;
 
 struct PktMetaInfo {
     seconds: u32,
@@ -207,8 +209,8 @@ fn next_packet(file_reader: &mut BufReader<File>) -> PktInfo {
         Ok(()) => {
             let ether_header = next_eth_packet(file_reader);
             match ether_header.typ {
-                2048 => packet_info,
-                _    => packet_info
+                0x800 => packet_info,    // change to block continuing the pattern
+                _    => packet_info    // skip the packet completely
                  
             }
         }
@@ -229,7 +231,58 @@ fn next_eth_packet(file_reader: &mut BufReader<File>) -> Etherhdr {
 }
 
 fn next_ip_packet(file_reader: &mut BufReader<File>) -> Iphdr {
+    let mut packet_buffer = vec![0u8; ip_hdr_len];
+    match file_reader.read_exact(&mut packet_buffer) {
+        Err(_) => Iphdr::malformed_header(),
+        Ok(()) => {
+            let cur_slice = u8::from_be(packet_buffer[0]);
+            let ip_ver = cur_slice & FIRST_NIBBLE;
+            let ihl = cur_slice & SECONDNIBBLE;
 
+            match ip_ver {
+                4 => {
+                    let options = match ihl {
+                        5 => Options::Opts20,
+                        6 => Options::Opts24,
+                        7 => Options::Opts28,
+                        8 => Options::Opts32,
+                        _ => Options::Malformed
+                    };
+
+                    match options {
+                        Malformed => Iphdr::malformed_header(),
+                        _ => {
+                            // here, determine if the header_len is correct wrt to the caplen and other stuff
+                            // might need to pass in PktMetaInfo, which would suck
+                            let header_len = ihl * 5;
+                            let dscp = u8::from_be(packet_buffer[1] & 0b11111100);
+                            let ecn  = u8::from_be(packet_buffer[1] & 0b00000011);
+                            let total_len = type_slice_to_u16(&packet_buffer[2..3]);
+                            let id = type_slice_to_u16(&packet_buffer[4..5]);
+        
+                            let frags_and_flags_slice = type_slice_to_u16(&packet_buffer[6..7]);
+                            let flags = u8::from_be((frags_and_flags_slice & 0xE000) as u8);    // this will certainly cause issues
+                            let frags = frags_and_flags_slice & 0x1FFF;
+                            let ttl = u8::from_be(packet_buffer[8]);
+                            let protocol = u8::from_be(packet_buffer[9]);
+                            let hdr_checksum = type_slice_to_u16(&packet_buffer[10..11]);
+                            let src_ip = bytes_to_u32(&packet_buffer[12..15]);
+                            let dst_ip = bytes_to_u32(&packet_buffer[16..]);
+        
+                            Iphdr::new(ip_ver, ihl, dscp, ecn, 
+                                total_len, id, flags, frags, ttl, protocol,
+                                 hdr_checksum, options, 
+                                 src_ip, dst_ip, header_len)
+                        }
+                    }
+                }
+                _ => {
+                    Iphdr::ignored_ver_header(ip_ver)
+                }
+            }
+        }
+    }
+    
 }
 
 fn next_tcp_packet(file_reader: &mut BufReader<File>) -> Tcphdr {
@@ -247,10 +300,18 @@ fn mac_slice_to_array(mac_slice: &[u8]) -> [u8; 6] {
     }
 }
 
+// rename
 fn type_slice_to_u16(type_slice: &[u8]) -> u16 {
     match type_slice.try_into() {
         Ok(typ) => u16::from_ne_bytes(typ),
         Err(why) => panic!("Error in Transport Analysis:\nFailed to convert Type slice.")
+    }
+}
+
+fn bytes_to_u32(bytes: &[u8]) -> u32 {
+    match bytes.try_into() {
+        Ok(num) => u32::from_ne_bytes(num),
+        Err(why) => panic!("Obama style: {}", why)
     }
 }
 
