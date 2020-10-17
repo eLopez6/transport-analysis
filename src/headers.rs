@@ -5,10 +5,6 @@ use bitvec::prelude::*;
 const MAC_LENGTH:  usize = 6;
 const CRC_LENGTH:  usize = 4;
 
-const OPTIONS_28: usize = 2;
-const OPTIONS_32: usize = 3;
-const OPTIONS_36: usize = 4;
-
 pub const eth_hdr_len: usize = 14;
 pub const ip_hdr_len: usize = 20;
 pub const udp_hdr_len: usize = 8;
@@ -99,7 +95,10 @@ impl Iphdr {
         }
     }
     
-    pub fn new(version: u8, ihl: u8, dscp: u8, ecn: u8, total_len: u16, id: u16, flags: u8, frags: u16, ttl: u8, protocol: u8, hdr_checksum: u16, options: Options, src: u32, dst: u32, header_len: u8) -> Iphdr {
+    pub fn new(version: u8, ihl: u8, dscp: u8, ecn: u8, total_len: u16, id: u16,
+        flags: u8, frags: u16, ttl: u8, protocol: u8, hdr_checksum: u16, 
+        options: Options, src: u32, dst: u32, header_len: u8) -> Iphdr {
+
         let ver = bitarr![Lsb0, u8; version; 4];
         let ihl = bitarr![Lsb0, u8; ihl; 4];
         let dscp = bitarr![Lsb0, u8; dscp; 6];
@@ -134,6 +133,26 @@ pub struct Udphdr {
     pub dst_port: u16,
     pub length  : u16,
     pub checksum: u16
+}
+impl Udphdr {
+
+    pub fn malformed_header() -> Udphdr {
+        Udphdr {
+            src_port: 0,
+            dst_port: 0,
+            length: 0,
+            checksum: 0
+        }
+    }
+
+    pub fn new(src_port: u16, dst_port: u16, length: u16, checksum: u16) -> Udphdr {
+        Udphdr {
+            src_port: src_port,
+            dst_port: dst_port,
+            length: length,
+            checksum: checksum
+        }
+    }
 }
 
 pub struct Tcphdr {
