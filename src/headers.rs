@@ -5,8 +5,9 @@ use bitvec::prelude::*;
 const MAC_LENGTH:  usize = 6;
 
 pub const eth_hdr_len: usize = 14;
-pub const ip_hdr_len: usize = 20;
+pub const ip_hdr_len:  usize = 20;
 pub const udp_hdr_len: usize = 8;
+pub const tcp_hdr_len: usize = 20;
 
 #[derive(Clone)]
 pub struct Etherhdr {
@@ -173,6 +174,44 @@ pub struct Tcphdr {
     pub options    : Options,
     pub head_length: u8,
     pub malformed  : bool   // this is true when the data_off*4 != the length of the packet
+}
+impl Tcphdr {
+    pub fn malformed_header() -> Tcphdr {
+        Tcphdr {
+            malformed: true,
+            src_port    : 0,
+            dst_port    : 0,
+            seq_num     : 0,
+            ack_num     : 0,
+            data_off    : bitarr![Lsb0, u8; 0; 4],
+            reserved    : bitarr![Lsb0, u8; 0; 3],
+            flags       : bitarr![Lsb0, u16; 0; 9],
+            window_size : 0,
+            checksum    : 0,
+            urg_pointer : 0,
+            options     : Options::Malformed,
+            head_length : 0
+        }
+    }
+
+    pub fn new(src_port: u16, dst_port: u16, seq_num: u32, ack_num: u32, data_off: u8, reserved: u8,
+        flags: u16, window_size: u16, checksum: u16, urg_pointer: u16, options: Options, header_length: u8) -> Tcphdr {
+            Tcphdr {
+                malformed: false,
+                src_port    : src_port,
+                dst_port    : dst_port,
+                seq_num     : seq_num,
+                ack_num     : ack_num,
+                data_off    : bitarr![Lsb0, u8; data_off; 4],
+                reserved    : bitarr![Lsb0, u8; reserved; 3],
+                flags       : bitarr![Lsb0, u16; flags; 9],
+                window_size : window_size,
+                checksum    : checksum,
+                urg_pointer : urg_pointer,
+                options     : Options::Malformed,
+                head_length : header_length
+            }
+        }
 }
 
 // Where the ith bit of the array 0b1000 => 3,2,1,0
