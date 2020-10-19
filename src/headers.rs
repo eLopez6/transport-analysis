@@ -3,12 +3,12 @@ use bitvec::order::Lsb0;
 use bitvec::prelude::*;
 
 const MAC_LENGTH:  usize = 6;
-const CRC_LENGTH:  usize = 4;
 
 pub const eth_hdr_len: usize = 14;
 pub const ip_hdr_len: usize = 20;
 pub const udp_hdr_len: usize = 8;
 
+#[derive(Clone)]
 pub struct Etherhdr {
     pub src_adr : [u8; MAC_LENGTH],
     pub dest_adr: [u8; MAC_LENGTH],
@@ -25,6 +25,7 @@ impl Etherhdr {
 }
 
 // The same Options enum can be used for IP and TCP
+#[derive(Clone)]
 pub enum Options {
     Ignored,
     Malformed,
@@ -34,6 +35,7 @@ pub enum Options {
     Opts32,
 }
 
+#[derive(Clone)]
 pub struct Iphdr {
     pub version       : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,     // 4 bits
     pub ihl           : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,     // 4 bits
@@ -128,6 +130,7 @@ impl Iphdr {
     }
 }
 
+#[derive(Clone)]
 pub struct Udphdr {
     pub src_port: u16,
     pub dst_port: u16,
@@ -155,6 +158,7 @@ impl Udphdr {
     }
 }
 
+#[derive(Clone)]
 pub struct Tcphdr {
     pub src_port   : u16,
     pub dst_port   : u16,
@@ -162,11 +166,11 @@ pub struct Tcphdr {
     pub ack_num    : u32,
     pub data_off   : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>,    // 4 bits
     pub reserved   : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(3)]>,    // 3 bits
-    pub flags      : BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(9)]>,    // 9 bits
+    pub flags      : BitArray<Lsb0, [u16; bitvec::mem::elts::<u16>(9)]>,    // 9 bits
     pub window_size: u16,
     pub checksum   : u16, 
     pub urg_pointer: u16,
-    pub options    : Option<Options>,
+    pub options    : Options,
     pub head_length: u8,
     pub malformed  : bool   // this is true when the data_off*4 != the length of the packet
 }
