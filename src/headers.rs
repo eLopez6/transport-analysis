@@ -52,7 +52,7 @@ pub struct Iphdr {
     pub src_ip_adr    : u32,
     pub dst_ip_adr    : u32,
     pub options       : Options,
-    pub head_length   : u8,
+    pub head_length   : u16,
     pub malformed     : bool    // this is true when ihl*4 != the length of the packet
 }
 impl Iphdr {
@@ -100,7 +100,7 @@ impl Iphdr {
     
     pub fn new(version: u8, ihl: u8, dscp: u8, ecn: u8, total_len: u16, id: u16,
         flags: u8, frags: u16, ttl: u8, protocol: u8, hdr_checksum: u16, 
-        options: Options, src: u32, dst: u32, header_len: u8) -> Iphdr {
+        options: Options, src: u32, dst: u32, header_len: u16) -> Iphdr {
 
         let ver = bitarr![Lsb0, u8; version; 4];
         let ihl = bitarr![Lsb0, u8; ihl; 4];
@@ -172,7 +172,7 @@ pub struct Tcphdr {
     pub checksum   : u16, 
     pub urg_pointer: u16,
     pub options    : Options,
-    pub head_length: u8,
+    pub head_length: u16,
     pub malformed  : bool   // this is true when the data_off*4 != the length of the packet
 }
 impl Tcphdr {
@@ -195,7 +195,7 @@ impl Tcphdr {
     }
 
     pub fn new(src_port: u16, dst_port: u16, seq_num: u32, ack_num: u32, data_off: u8, reserved: u8,
-        flags: u16, window_size: u16, checksum: u16, urg_pointer: u16, options: Options, header_length: u8) -> Tcphdr {
+        flags: u16, window_size: u16, checksum: u16, urg_pointer: u16, options: Options, header_length: u16) -> Tcphdr {
             Tcphdr {
                 malformed: false,
                 src_port    : src_port,

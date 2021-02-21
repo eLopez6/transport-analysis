@@ -4,8 +4,9 @@ extern crate clap;
 
 use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, Options, eth_hdr_len, ip_hdr_len, udp_hdr_len, tcp_hdr_len};
 use clap::{Arg, App};
-use std::convert::TryInto;
+use std::convert::{TryInto};
 use std::fs::File;
+use std::net::Ipv4Addr;
 use std::io::{Read, BufReader};
 use std::path::Path;
 
@@ -47,12 +48,6 @@ enum PacketType {
     UdpPacket(Etherhdr, Iphdr, Udphdr),
     TcpPacket(Etherhdr, Iphdr, Tcphdr),
 }
-
-// use more type fuckery to handle more illegal state
-// i.e., if it aint Ethernet packet, we ain't concerned about its IP and TCP
-// or like, if the IP header is incomplete, we aren't concerned about the TCP
-
-// enum valid types, i.e., incomplete IP packet, valid TCP packet
 
 #[derive(Clone)]
 struct PktInfo {
@@ -182,13 +177,60 @@ fn packet_dumping(filename_str: &str) {
 
     let mut cur_packet = next_packet(&mut reader);
     while cur_packet.is_some() {
-
-        // TODO implement printing of values from packet
-
-
+        dump_packet(cur_packet.unwrap());
         cur_packet = next_packet(&mut reader);
     }
+}
 
+fn dump_packet(packet: PktInfo) {
+    let packet_type = packet.packet_type;
+    match &packet_type {
+        PacketType::TcpPacket(_, ip_header, tcp_header) => {
+            print!("{} ", packet.timestamp);
+            let payload = ip_header.tot_len - ip_header.head_length - tcp_header.head_length;
+            print_tcp_packet(ip_header, tcp_header);
+            print!("{} ", payload);
+            print_reliable_comm(tcp_header);
+            print!("\n");
+        },
+        PacketType::UdpPacket(_, ip_header, udp_header) => {
+            print!("{} ", packet.timestamp);
+            let payload = udp_header.length - udp_hdr_len as u16;
+            print_udp_packet(ip_header, udp_header);
+            print!("{} ", payload);
+            print!("\n");
+        }
+        _ => {
+            // ignore
+        }
+    }
+}
+
+fn print_tcp_packet(ip_header: &Iphdr, tcp_header: &Tcphdr) {
+    let src_ip = convert_decimal_to_ip(ip_header.src_ip_adr);
+    let src_port = tcp_header.src_port;
+    let dst_ip = convert_decimal_to_ip(ip_header.dst_ip_adr);
+    let dst_port = tcp_header.dst_port;
+    print!("{} {} {} {} T ", src_ip, src_port, dst_ip, dst_port);
+}
+
+fn print_reliable_comm(tcp_header: &Tcphdr) {
+    print!("{} {}", tcp_header.seq_num, tcp_header.ack_num);
+}
+
+fn print_udp_packet(ip_header: &Iphdr, udp_header: &Udphdr) {
+    let src_ip = convert_decimal_to_ip(ip_header.src_ip_adr);
+    let src_port = udp_header.src_port;
+    let dst_ip = convert_decimal_to_ip(ip_header.dst_ip_adr);
+    let dst_port = udp_header.dst_port;
+    print!("{} {} {} {} U ", src_ip, src_port, dst_ip, dst_port);
+}
+
+fn convert_decimal_to_ip(ip: u32) -> Ipv4Addr {
+    Ipv4Addr::new((ip << 24) as u8, 
+        (ip << 16) as u8, 
+        (ip << 8) as u8, 
+        ip as u8)
 }
 
 fn roundtrip_times(filename_str: &str) {
@@ -243,7 +285,7 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
                         }
     
                     },   
-                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header)))    // skip the packet completely
+                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header)))
                      
                 }
             }
@@ -275,14 +317,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
 
             match ip_ver {
                 4 => {
-                    // abstract into its own method
-                    let options = match ihl {
-                        5 => Options::Opts20,
-                        6 => Options::Opts24,
-                        7 => Options::Opts28,
-                        8 => Options::Opts32,
-                        _ => Options::Malformed
-                    };
+                    let options = compute_options_type(ihl);
 
                     // move this around maybe
                     let header_len = ihl * 5;
@@ -311,7 +346,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
                             Iphdr::new(ip_ver, ihl, dscp, ecn, 
                                 total_len, id, flags, frags, ttl, protocol,
                                  hdr_checksum, options, 
-                                 src_ip, dst_ip, header_len)
+                                 src_ip, dst_ip, header_len as u16)
                         }
                     }
                 }
@@ -353,14 +388,7 @@ fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMeta
             let reserved = u8::from_be((fields & 0x0300 >> 9).try_into().unwrap());
             let flags = u16::from_be(fields & 0x01FF);
 
-            // abstract into its own method
-            let options = match data_off {
-                5 => Options::Opts20,
-                6 => Options::Opts24,
-                7 => Options::Opts28,
-                8 => Options::Opts32,
-                _ => Options::Malformed
-            };
+            let options = compute_options_type(data_off);
 
             let header_len = 5 * data_off;
             let min_length = u16::from(header_len) + (eth_hdr_len + ip_hdr_len + tcp_hdr_len) as u16;
@@ -372,10 +400,9 @@ fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMeta
             let checksum = bytes_to_u16(&packet_buffer[16..17]);
             let urg = bytes_to_u16(&packet_buffer[18..]);
 
-            // Tcphdr::malformed_header()
             Tcphdr::new(src_port, dst_port, seq_num, ack_num, data_off, reserved,
                 flags, window_size, checksum, 
-                urg, options, header_len)
+                urg, options, header_len as u16)
         }
     }
 }
@@ -390,14 +417,14 @@ fn mac_slice_to_array(mac_slice: &[u8]) -> [u8; 6] {
 // rename
 fn bytes_to_u16(type_slice: &[u8]) -> u16 {
     match type_slice.try_into() {
-        Ok(typ) => u16::from_ne_bytes(typ),
+        Ok(typ) => u16::from_be_bytes(typ),
         Err(_) => panic!("Error in Transport Analysis:\nFailed to convert Type slice.")
     }
 }
 
 fn bytes_to_u32(bytes: &[u8]) -> u32 {
     match bytes.try_into() {
-        Ok(num) => u32::from_ne_bytes(num),
+        Ok(num) => u32::from_be_bytes(num),
         Err(why) => panic!("Obama style: {}", why)
     }
 }
@@ -407,7 +434,7 @@ fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
     let mut buf32 = [0; 4];
     match file_reader.read(&mut buf32) {
         Ok(0) => 0,
-        Ok(_) => u32::from_ne_bytes(buf32),
+        Ok(_) => u32::from_be_bytes(buf32),
         Err(why) => panic!("Error in Transport Analysis:\nFailed to read u32: {}", why.to_string())
     }
 }
@@ -417,11 +444,21 @@ fn read_u16_from_file(file_reader: &mut BufReader<File>) -> u16 {
     let mut buf16 = [0; 2];
     match file_reader.read(&mut buf16) {
         Ok(0) => 0,
-        Ok(_) => u16::from_ne_bytes(buf16),
+        Ok(_) => u16::from_be_bytes(buf16),
         Err(why) => panic!("Failed to read u16: {}", why.to_string())
     }
 }
 
 fn error_exit(err_message: &str) {
     panic!("Error in Transport Analysis: {}!", err_message)
+}
+
+fn compute_options_type(val: u8) -> Options {
+    match val {
+        5 => Options::Opts20,
+        6 => Options::Opts24,
+        7 => Options::Opts28,
+        8 => Options::Opts32,
+        _ => Options::Malformed
+    }
 }
