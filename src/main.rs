@@ -14,8 +14,13 @@ const MAX_ETH_PKT: usize = 1518;
 const ENDPOINT_MEMBERS: usize = 2;
 const FIRST_NIBBLE:  u8 = 0b11110000;
 const SECOND_NIBBLE: u8 = 0b00001111;
+const MICROSECONDS_PER_SECOND: f64 = 1000000.0;
+const IP_PROTOCOL: u16 = 2048;
+const IPV4_PROTOCOL: u8 = 4;
+const TCP_PROTOCOL: u8 = 6;
+const UDP_PROTOCOL: u8 = 17;
 
-#[derive(Clone)]
+#[derive(Clone,Copy)]
 struct PktMetaInfo {
     seconds: u32,
     microseconds: u32,
@@ -24,16 +29,8 @@ struct PktMetaInfo {
 }
 
 impl PktMetaInfo {
-    fn new_empty() -> PktMetaInfo {
-        PktMetaInfo {
-            seconds      : 0,
-            microseconds : 0,
-            caplen       : 0,
-            ignored      : 0
-        }
-    }
 
-    fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInfo {
+fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInfo {
         PktMetaInfo {
             seconds: seconds,
             microseconds: microseconds,
@@ -42,15 +39,13 @@ impl PktMetaInfo {
         }
     }
 }
-
-// convert to structs
 #[derive(Clone)]
 enum PacketType {
     Unknown,
     EthPacket(Etherhdr),
-    IpPacket (Etherhdr, Iphdr, u8),
-    UdpPacket(Etherhdr, Iphdr, u8, Udphdr),
-    TcpPacket(Etherhdr, Iphdr, u8, Tcphdr, u8),
+    IpPacket (Etherhdr, Iphdr),
+    UdpPacket(Etherhdr, Iphdr, Udphdr),
+    TcpPacket(Etherhdr, Iphdr, Tcphdr),
 }
 
 // use more type fuckery to handle more illegal state
@@ -62,24 +57,27 @@ enum PacketType {
 #[derive(Clone)]
 struct PktInfo {
     meta: PktMetaInfo,
-    packet_bytes: Vec<u8>,
     packet_type: PacketType,
     timestamp   : f64
 }
 
 impl PktInfo {
-
-    // create new PktInfo
-    // fn new(meta: PktMetaInfo, )
-    fn new(meta: PktMetaInfo) -> PktInfo {
+    fn new_unknown(meta: PktMetaInfo) -> PktInfo {
         PktInfo {
             meta : meta,
-            packet_bytes : Vec::with_capacity(MAX_ETH_PKT),
             packet_type : PacketType::Unknown,
             timestamp : 0.0
         }
     }
 
+    fn new(meta: PktMetaInfo, packet_type: PacketType) -> PktInfo {
+        PktInfo {
+            meta : meta,
+            packet_type : packet_type,
+            timestamp : f64::from(meta.seconds) + 
+                (f64::from(meta.microseconds) / MICROSECONDS_PER_SECOND)
+        }
+    }
 }
 
 // #[derive(Hash)]
@@ -180,9 +178,16 @@ fn packet_dumping(filename_str: &str) {
         Err(why) => panic!("Failed to open {}: {}", display, why.to_string()),
         Ok(trace) => trace,
     };
-    let reader = BufReader::new(trace);
+    let mut reader = BufReader::new(trace);
 
-    let packet = PktInfo::new(PktMetaInfo::new_empty());
+    let mut cur_packet = next_packet(&mut reader);
+    while cur_packet.is_some() {
+
+        // TODO implement printing of values from packet
+
+
+        cur_packet = next_packet(&mut reader);
+    }
 
 }
 
@@ -199,24 +204,48 @@ fn next_packet_meta(file_reader: &mut BufReader<File>) -> PktMetaInfo {
     PktMetaInfo::new(seconds, microseconds, caplen, ignored)
 }
 
-fn next_packet(file_reader: &mut BufReader<File>) -> PktInfo {
+fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
     let packet_meta_info = next_packet_meta(file_reader);
-    let packet_info = PktInfo::new(packet_meta_info.clone());
 
-    if packet_meta_info.caplen > MAX_ETH_PKT as u16 {
-        error_exit("Packet size is larger than MAX_ETH_PKT");
-    }
-
-    let packet_length: usize = (packet_meta_info.caplen - META_INFO_SIZE as u16).into();
-    let mut packet_buffer = vec![0u8; packet_length];
-    match file_reader.read_exact(&mut packet_buffer) {
-        Err(why) => panic!("Error in  Transport Analysis:\nFailed to read the packet: {}", why.to_string()),
-        Ok(()) => {
-            let ether_header = next_eth_packet(file_reader);
-            match ether_header.typ {
-                0x800 => packet_info,    // change to block continuing the pattern
-                _    => packet_info    // skip the packet completely
-                 
+    if packet_meta_info.caplen == 0 {
+        None
+    } else {
+        if packet_meta_info.caplen > MAX_ETH_PKT as u16 {
+            error_exit("Packet size is larger than MAX_ETH_PKT");
+        }
+    
+        let packet_length: usize = (packet_meta_info.caplen - META_INFO_SIZE as u16).into();
+        let mut packet_buffer = vec![0u8; packet_length];
+        match file_reader.read_exact(&mut packet_buffer) {
+            Err(why) => panic!("Error in  Transport Analysis:\nFailed to read the packet: {}", why.to_string()),
+            Ok(()) => {
+                let ether_header = next_eth_packet(file_reader);
+                match ether_header.typ {
+                    IP_PROTOCOL => {
+                        let ip_header = next_ip_packet(file_reader, &packet_meta_info);
+                        match ip_header.protocol {
+                            IPV4_PROTOCOL => {
+                                match ip_header.protocol {
+                                    TCP_PROTOCOL => {
+                                        let tcp_header = next_tcp_packet(file_reader, &packet_meta_info);
+                                        Some(PktInfo::new(packet_meta_info, 
+                                            PacketType::TcpPacket(ether_header, ip_header, tcp_header)))
+                                    },
+                                    UDP_PROTOCOL => {
+                                        let udp_header = next_udp_packet(file_reader);
+                                        Some(PktInfo::new(packet_meta_info, 
+                                            PacketType::UdpPacket(ether_header, ip_header, udp_header)))
+                                    }
+                                    _ =>  Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header)))
+                                }
+                            },
+                            _ => Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header)))                    
+                        }
+    
+                    },   
+                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header)))    // skip the packet completely
+                     
+                }
             }
         }
     }
@@ -240,7 +269,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
     match file_reader.read_exact(&mut packet_buffer) {
         Err(_) => Iphdr::malformed_header(),
         Ok(()) => {
-            let cur_slice = u8::from_le(packet_buffer[0]);
+            let cur_slice = u8::from_be(packet_buffer[0]);
             let ip_ver = cur_slice & FIRST_NIBBLE >> 4;
             let ihl = cur_slice & SECOND_NIBBLE;
 
@@ -265,16 +294,16 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
                     match options {
                         Options::Malformed => Iphdr::malformed_header(),
                         _ => {
-                            let dscp = u8::from_le(packet_buffer[1] & 0b11111100 >> 2);
-                            let ecn  = u8::from_le(packet_buffer[1] & 0b00000011);
+                            let dscp = u8::from_be(packet_buffer[1] & 0b11111100 >> 2);
+                            let ecn  = u8::from_be(packet_buffer[1] & 0b00000011);
                             let total_len = bytes_to_u16(&packet_buffer[2..3]);
                             let id = bytes_to_u16(&packet_buffer[4..5]);
         
                             let frags_and_flags_slice = bytes_to_u16(&packet_buffer[6..7]);
-                            let flags = u8::from_le((frags_and_flags_slice & 0xE000 >> 13) as u8);    // this will certainly cause issues
+                            let flags = u8::from_be((frags_and_flags_slice & 0xE000 >> 13) as u8);    // this will certainly cause issues
                             let frags = frags_and_flags_slice & 0x1FFF;
-                            let ttl = u8::from_le(packet_buffer[8]);
-                            let protocol = u8::from_le(packet_buffer[9]);
+                            let ttl = u8::from_be(packet_buffer[8]);
+                            let protocol = u8::from_be(packet_buffer[9]);
                             let hdr_checksum = bytes_to_u16(&packet_buffer[10..11]);
                             let src_ip = bytes_to_u32(&packet_buffer[12..15]);
                             let dst_ip = bytes_to_u32(&packet_buffer[16..]);
@@ -295,7 +324,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
     
 }
 
-fn next_udp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaInfo) -> Udphdr {
+fn next_udp_packet(file_reader: &mut BufReader<File>) -> Udphdr {
     let mut packet_buffer = vec![0u8; udp_hdr_len];
     match file_reader.read_exact(&mut packet_buffer) {
         Err(why) => panic!("Error in Transport Analysis:\nFailed to read the packet: {}", why.to_string()),
@@ -320,9 +349,9 @@ fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMeta
             let ack_num = bytes_to_u32(&packet_buffer[8..11]);
             let fields = bytes_to_u16(&packet_buffer[12..13]);
 
-            let data_off = u8::from_le((fields & 0xF000 >> 12).try_into().unwrap());
-            let reserved = u8::from_le((fields & 0x0300 >> 9).try_into().unwrap());
-            let flags = u16::from_le(fields & 0x01FF);
+            let data_off = u8::from_be((fields & 0xF000 >> 12).try_into().unwrap());
+            let reserved = u8::from_be((fields & 0x0300 >> 9).try_into().unwrap());
+            let flags = u16::from_be(fields & 0x01FF);
 
             // abstract into its own method
             let options = match data_off {
@@ -376,8 +405,9 @@ fn bytes_to_u32(bytes: &[u8]) -> u32 {
 // Move to library
 fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
     let mut buf32 = [0; 4];
-    match file_reader.read_exact(&mut buf32) {
-        Ok(()) => u32::from_ne_bytes(buf32),
+    match file_reader.read(&mut buf32) {
+        Ok(0) => 0,
+        Ok(_) => u32::from_ne_bytes(buf32),
         Err(why) => panic!("Error in Transport Analysis:\nFailed to read u32: {}", why.to_string())
     }
 }
@@ -385,8 +415,9 @@ fn read_u32_from_file(file_reader: &mut BufReader<File>) -> u32 {
 // Move to library
 fn read_u16_from_file(file_reader: &mut BufReader<File>) -> u16 {
     let mut buf16 = [0; 2];
-    match file_reader.read_exact(&mut buf16) {
-        Ok(()) => u16::from_ne_bytes(buf16),
+    match file_reader.read(&mut buf16) {
+        Ok(0) => 0,
+        Ok(_) => u16::from_ne_bytes(buf16),
         Err(why) => panic!("Failed to read u16: {}", why.to_string())
     }
 }

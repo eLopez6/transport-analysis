@@ -208,7 +208,7 @@ impl Tcphdr {
                 window_size : window_size,
                 checksum    : checksum,
                 urg_pointer : urg_pointer,
-                options     : Options::Malformed,
+                options     : options,
                 head_length : header_length
             }
         }
