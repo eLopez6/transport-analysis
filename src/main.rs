@@ -53,7 +53,8 @@ enum PacketType {
 struct PktInfo {
     meta: PktMetaInfo,
     packet_type: PacketType,
-    timestamp   : f64
+    timestamp   : f64,
+    payload: u16
 }
 
 impl PktInfo {
@@ -61,16 +62,18 @@ impl PktInfo {
         PktInfo {
             meta : meta,
             packet_type : PacketType::Unknown,
-            timestamp : 0.0
+            timestamp : 0.0,
+            payload: 0
         }
     }
 
-    fn new(meta: PktMetaInfo, packet_type: PacketType) -> PktInfo {
+    fn new(meta: PktMetaInfo, packet_type: PacketType, payload: u16) -> PktInfo {
         PktInfo {
             meta : meta,
             packet_type : packet_type,
-            timestamp : f64::from(meta.seconds) + 
-                (f64::from(meta.microseconds) / MICROSECONDS_PER_SECOND)
+            timestamp : f64::from(meta.seconds) +
+                (f64::from(meta.microseconds) / MICROSECONDS_PER_SECOND),
+            payload : payload
         }
     }
 }
@@ -161,11 +164,6 @@ fn main() {
     }
 }
 
-fn connection_summaries(filename_str: &str) {
-
-}
-
-
 fn packet_dumping(filename_str: &str) {
     let display = Path::new(filename_str).display();
 
@@ -187,17 +185,15 @@ fn dump_packet(packet: PktInfo) {
     match &packet_type {
         PacketType::TcpPacket(_, ip_header, tcp_header) => {
             print!("{} ", packet.timestamp);
-            let payload = ip_header.tot_len - ip_header.head_length - tcp_header.head_length;
             print_tcp_packet(ip_header, tcp_header);
-            print!("{} ", payload);
+            print!("{} ", packet.payload);
             print_reliable_comm(tcp_header);
             print!("\n");
         },
         PacketType::UdpPacket(_, ip_header, udp_header) => {
             print!("{} ", packet.timestamp);
-            let payload = udp_header.length - udp_hdr_len as u16;
             print_udp_packet(ip_header, udp_header);
-            print!("{} ", payload);
+            print!("{} ", packet.payload);
             print!("\n");
         }
         _ => {
@@ -227,10 +223,14 @@ fn print_udp_packet(ip_header: &Iphdr, udp_header: &Udphdr) {
 }
 
 fn convert_decimal_to_ip(ip: u32) -> Ipv4Addr {
-    Ipv4Addr::new((ip << 24) as u8, 
-        (ip << 16) as u8, 
-        (ip << 8) as u8, 
+    Ipv4Addr::new((ip << 24) as u8,
+        (ip << 16) as u8,
+        (ip << 8) as u8,
         ip as u8)
+}
+
+fn connection_summaries(filename_str: &str) {
+
 }
 
 fn roundtrip_times(filename_str: &str) {
@@ -255,7 +255,7 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
         if packet_meta_info.caplen > MAX_ETH_PKT as u16 {
             error_exit("Packet size is larger than MAX_ETH_PKT");
         }
-    
+
         let packet_length: usize = (packet_meta_info.caplen - META_INFO_SIZE as u16).into();
         let mut packet_buffer = vec![0u8; packet_length];
         match file_reader.read_exact(&mut packet_buffer) {
@@ -270,23 +270,31 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
                                 match ip_header.protocol {
                                     TCP_PROTOCOL => {
                                         let tcp_header = next_tcp_packet(file_reader, &packet_meta_info);
-                                        Some(PktInfo::new(packet_meta_info, 
-                                            PacketType::TcpPacket(ether_header, ip_header, tcp_header)))
+                                        let payload = ip_header.tot_len - ip_header.head_length - tcp_header.head_length;
+                                        Some(PktInfo::new(packet_meta_info,
+                                            PacketType::TcpPacket(ether_header, ip_header, tcp_header),
+                                            payload))
                                     },
                                     UDP_PROTOCOL => {
                                         let udp_header = next_udp_packet(file_reader);
-                                        Some(PktInfo::new(packet_meta_info, 
-                                            PacketType::UdpPacket(ether_header, ip_header, udp_header)))
+                                        let payload = udp_header.length - udp_hdr_len as u16;
+                                        Some(PktInfo::new(packet_meta_info,
+                                            PacketType::UdpPacket(ether_header, ip_header, udp_header), payload))
                                     }
-                                    _ =>  Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header)))
+                                    _ =>  {
+                                        let payload = ip_header.tot_len - ip_header.head_length;
+                                        Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header), payload))
+                                    }
                                 }
                             },
-                            _ => Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header)))                    
+                            _ => {
+                                let payload = ip_header.tot_len - ip_header.head_length;
+                                Some(PktInfo::new(packet_meta_info, PacketType::IpPacket(ether_header, ip_header), payload))
+                            }
                         }
-    
-                    },   
-                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header)))
-                     
+                    },
+                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header), packet_meta_info.caplen - eth_hdr_len as u16))
+
                 }
             }
         }
@@ -333,7 +341,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
                             let ecn  = u8::from_be(packet_buffer[1] & 0b00000011);
                             let total_len = bytes_to_u16(&packet_buffer[2..3]);
                             let id = bytes_to_u16(&packet_buffer[4..5]);
-        
+
                             let frags_and_flags_slice = bytes_to_u16(&packet_buffer[6..7]);
                             let flags = u8::from_be((frags_and_flags_slice & 0xE000 >> 13) as u8);    // this will certainly cause issues
                             let frags = frags_and_flags_slice & 0x1FFF;
@@ -342,10 +350,10 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
                             let hdr_checksum = bytes_to_u16(&packet_buffer[10..11]);
                             let src_ip = bytes_to_u32(&packet_buffer[12..15]);
                             let dst_ip = bytes_to_u32(&packet_buffer[16..]);
-        
-                            Iphdr::new(ip_ver, ihl, dscp, ecn, 
+
+                            Iphdr::new(ip_ver, ihl, dscp, ecn,
                                 total_len, id, flags, frags, ttl, protocol,
-                                 hdr_checksum, options, 
+                                 hdr_checksum, options,
                                  src_ip, dst_ip, header_len as u16)
                         }
                     }
@@ -356,7 +364,7 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
             }
         }
     }
-    
+
 }
 
 fn next_udp_packet(file_reader: &mut BufReader<File>) -> Udphdr {
@@ -396,12 +404,12 @@ fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMeta
                 return Tcphdr::malformed_header();
             }
 
-            let window_size = bytes_to_u16(&packet_buffer[14..15]); 
+            let window_size = bytes_to_u16(&packet_buffer[14..15]);
             let checksum = bytes_to_u16(&packet_buffer[16..17]);
             let urg = bytes_to_u16(&packet_buffer[18..]);
 
             Tcphdr::new(src_port, dst_port, seq_num, ack_num, data_off, reserved,
-                flags, window_size, checksum, 
+                flags, window_size, checksum,
                 urg, options, header_len as u16)
         }
     }
