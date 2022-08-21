@@ -4,10 +4,10 @@ use bitvec::prelude::*;
 
 const MAC_LENGTH:  usize = 6;
 
-pub const eth_hdr_len: usize = 14;
-pub const ip_hdr_len:  usize = 20;
-pub const udp_hdr_len: usize = 8;
-pub const tcp_hdr_len: usize = 20;
+pub const ETH_HDR_LEN: usize = 14;
+pub const IP_HDR_LEN:  usize = 20;
+pub const UDP_HDR_LEN: usize = 8;
+pub const TCP_HDR_LEN: usize = 20;
 
 #[derive(Clone)]
 pub struct Etherhdr {
@@ -212,23 +212,4 @@ impl Tcphdr {
                 head_length : header_length
             }
         }
-}
-
-// Where the ith bit of the array 0b1000 => 3,2,1,0
-fn convert_4bits_to_num(field: BitArray<Lsb0, [u8; bitvec::mem::elts::<u8>(4)]>) -> u16 {
-    if field.len() != 4 {
-        match field.get(3) {
-            Some(true) => 32,                    // 0b1000
-            _          => match field.get(1) {
-                Some(true) => ip_hdr_len as u16,                // 0b0101
-                _          => match field.get(0) {
-                    Some(true) => 28,            // 0b0111
-                    _          => 24             // 0b0110
-                }
-            }
-        }
-    }
-    else {
-        panic!("BitArray supplied has an invalid capacity: {}", field.len());
-    }
 }

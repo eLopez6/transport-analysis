@@ -2,7 +2,7 @@ mod headers;
 
 extern crate clap;
 
-use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, Options, eth_hdr_len, ip_hdr_len, udp_hdr_len, tcp_hdr_len};
+use crate::headers::{Etherhdr, Iphdr, Tcphdr, Udphdr, Options, ETH_HDR_LEN, IP_HDR_LEN, UDP_HDR_LEN, TCP_HDR_LEN};
 use clap::{Arg, App};
 use std::convert::{TryInto};
 use std::fs::File;
@@ -26,12 +26,12 @@ struct PktMetaInfo {
     seconds: u32,
     microseconds: u32,
     caplen: u16,
-    ignored: u16
+    ignored: u16    // unused, but kept for explaning an extra read from the file
 }
 
 impl PktMetaInfo {
 
-fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInfo {
+    fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInfo {
         PktMetaInfo {
             seconds: seconds,
             microseconds: microseconds,
@@ -40,6 +40,7 @@ fn new(seconds: u32, microseconds: u32, caplen: u16, ignored: u16) -> PktMetaInf
         }
     }
 }
+
 #[derive(Clone)]
 enum PacketType {
     Unknown,
@@ -256,6 +257,11 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
             error_exit("Packet size is larger than MAX_ETH_PKT");
         }
 
+        // TODO: correct packet length for handling the continuous reads
+        // it might be right now, but i'm too tired to be sure. 
+        // if the code is wrong, i will need to pass around pointer math style slices of the packet_buffer as arguments for the next packet stuff
+        // the next packet methods probably need to be renamed to be parse header type or something
+        // then, change the methods such that next packet only returns a packet with the desired header for the sake of the other printings
         let packet_length: usize = (packet_meta_info.caplen - META_INFO_SIZE as u16).into();
         let mut packet_buffer = vec![0u8; packet_length];
         match file_reader.read_exact(&mut packet_buffer) {
@@ -277,7 +283,7 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
                                     },
                                     UDP_PROTOCOL => {
                                         let udp_header = next_udp_packet(file_reader);
-                                        let payload = udp_header.length - udp_hdr_len as u16;
+                                        let payload = udp_header.length - UDP_HDR_LEN as u16;
                                         Some(PktInfo::new(packet_meta_info,
                                             PacketType::UdpPacket(ether_header, ip_header, udp_header), payload))
                                     }
@@ -293,7 +299,7 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
                             }
                         }
                     },
-                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header), packet_meta_info.caplen - eth_hdr_len as u16))
+                    _    => Some(PktInfo::new(packet_meta_info, PacketType::EthPacket(ether_header), packet_meta_info.caplen - ETH_HDR_LEN as u16))
 
                 }
             }
@@ -302,7 +308,7 @@ fn next_packet(file_reader: &mut BufReader<File>) -> Option<PktInfo> {
 }
 
 fn next_eth_packet(file_reader: &mut BufReader<File>) -> Etherhdr {
-    let mut packet_buffer = vec![0u8; eth_hdr_len];
+    let mut packet_buffer = vec![0u8; ETH_HDR_LEN];
     match file_reader.read_exact(&mut packet_buffer) {
         Err(why) => panic!("Error in Transport Analysis:\n Failed to read the packet: {}", why.to_string()),
         Ok(()) => {
@@ -315,21 +321,21 @@ fn next_eth_packet(file_reader: &mut BufReader<File>) -> Etherhdr {
 }
 
 fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaInfo) -> Iphdr {
-    let mut packet_buffer = vec![0u8; ip_hdr_len];
+    let mut packet_buffer = vec![0u8; IP_HDR_LEN];
     match file_reader.read_exact(&mut packet_buffer) {
         Err(_) => Iphdr::malformed_header(),
         Ok(()) => {
             let cur_slice = u8::from_be(packet_buffer[0]);
             let ip_ver = cur_slice & FIRST_NIBBLE >> 4;
-            let ihl = cur_slice & SECOND_NIBBLE;
 
             match ip_ver {
                 4 => {
+                    let ihl = cur_slice & SECOND_NIBBLE;
                     let options = compute_options_type(ihl);
 
                     // move this around maybe
                     let header_len = ihl * 5;
-                    let min_length = u16::from(header_len) + eth_hdr_len as u16;
+                    let min_length = u16::from(header_len) + ETH_HDR_LEN as u16;
                     if packet_meta_info.caplen < min_length {
                         return Iphdr::malformed_header()
                     }
@@ -368,7 +374,10 @@ fn next_ip_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaI
 }
 
 fn next_udp_packet(file_reader: &mut BufReader<File>) -> Udphdr {
-    let mut packet_buffer = vec![0u8; udp_hdr_len];
+    let mut packet_buffer = vec![0u8; UDP_HDR_LEN];
+
+    // TODO add check for malformed udp header here, pass in head_len from ip_header
+
     match file_reader.read_exact(&mut packet_buffer) {
         Err(why) => panic!("Error in Transport Analysis:\nFailed to read the packet: {}", why.to_string()),
         Ok(()) => {
@@ -382,7 +391,7 @@ fn next_udp_packet(file_reader: &mut BufReader<File>) -> Udphdr {
 }
 
 fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMetaInfo) -> Tcphdr {
-    let mut packet_buffer = vec![0u8; tcp_hdr_len];
+    let mut packet_buffer = vec![0u8; TCP_HDR_LEN];
     match file_reader.read_exact(&mut packet_buffer) {
         Err(why) => panic!("Error in Transport Analysis:\n Failed to read the packet: {}", why.to_string()),
         Ok(()) => {
@@ -397,9 +406,9 @@ fn next_tcp_packet(file_reader: &mut BufReader<File>, packet_meta_info: &PktMeta
             let flags = u16::from_be(fields & 0x01FF);
 
             let options = compute_options_type(data_off);
-
             let header_len = 5 * data_off;
-            let min_length = u16::from(header_len) + (eth_hdr_len + ip_hdr_len + tcp_hdr_len) as u16;
+
+            let min_length = u16::from(header_len) + (ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN) as u16;
             if packet_meta_info.caplen < min_length {
                 return Tcphdr::malformed_header();
             }
